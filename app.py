@@ -140,11 +140,11 @@ if not df_facturas_input.empty and "Monto ($)" in df_facturas_input.columns:
 class FactorajePDF(FPDF):
     def header(self):
         if os.path.exists(LOGO_PATH):
-            # Reducido el tamaño del logo (w=35) y colocado en la esquina superior izquierda
-            self.image(LOGO_PATH, x=10, y=10, w=35)
+            # Se bajó el logo cambiando y=10 por y=15. Sigue alineado a la izquierda (x=10).
+            self.image(LOGO_PATH, x=10, y=15, w=35)
         
-        # Ajustamos el inicio del texto hacia abajo (y=40) para evitar que se encime con logos verticales
-        self.set_y(40)
+        # Se ajustó el inicio del título a y=42 para mantener simetría con el espacio del logo
+        self.set_y(42)
         self.set_font('Arial', 'B', 12)
         self.set_text_color(27, 27, 27) 
         self.cell(0, 6, 'Cotización de Factoraje', 0, 1, 'C')
