@@ -4,11 +4,12 @@ from fpdf import FPDF
 import base64
 import os
 from datetime import datetime
+import xml.etree.ElementTree as ET
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA
 # ==========================================
-st.set_page_config(page_title="FEX Capital - Factoraje", layout="wide", page_icon="📈")
+st.set_page_config(page_title="FEX Capital - Factoraje", layout="wide")
 
 LOGO_PATH = "LOGO_FEX.png"
 
@@ -25,6 +26,7 @@ tiie_input = st.sidebar.number_input("Tasa Base (TIIE/SOFR) %", min_value=0.0, v
 spread_input = st.sidebar.number_input("Spread (Sobretasa) %", min_value=0.0, value=5.00, step=0.1) / 100
 aforo_input = st.sidebar.number_input("Aforo (Garantía) %", min_value=0.0, value=13.0, step=0.5) / 100
 comision_input = st.sidebar.number_input("Comisión Apertura %", min_value=0.0, value=7.0, step=0.5) / 100
+plazo_input = st.sidebar.number_input("Plazo de la Operación (Días)", min_value=1, value=30, step=1)
 
 tasa_total = tiie_input + spread_input
 
@@ -48,36 +50,55 @@ st.markdown("### Carga de Facturas")
 
 metodo_captura = st.radio(
     "Selecciona el método de ingreso:",
-    ["Captura Manual Rápida", "Subir Archivo (Excel/CSV)"],
+    ["Captura Manual", "Subir XML (CFDI)"],
     horizontal=True
 )
 
 df_facturas_input = pd.DataFrame()
 
-if metodo_captura == "Captura Manual Rápida":
+if metodo_captura == "Captura Manual":
     st.info("Ingresa los datos directamente. Haz clic en la tabla para editar o en la última fila para agregar nuevas.")
-    df_base = pd.DataFrame({"Folio": [""], "Monto ($)": [0.0], "Plazo (Días)": [30]})
+    df_base = pd.DataFrame({"Folio": [""], "Monto ($)": [0.0]})
     df_facturas_input = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, hide_index=True)
 else:
-    st.info("Sube un archivo con las columnas exactas: Folio, Monto ($), Plazo (Días)")
-    archivo_subido = st.file_uploader("Cargar Archivo", type=["csv", "xlsx"])
-    if archivo_subido is not None:
-        try:
-            if archivo_subido.name.endswith('.csv'):
-                df_facturas_input = pd.read_csv(archivo_subido)
-            else:
-                df_facturas_input = pd.read_excel(archivo_subido)
-            st.success("Archivo procesado correctamente.")
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
+    st.info("Sube uno o varios archivos XML. El sistema extraerá el Folio y Monto Total automáticamente.")
+    archivos_subidos = st.file_uploader("Cargar XML", type=["xml"], accept_multiple_files=True)
+    
+    if archivos_subidos:
+        facturas_extraidas = []
+        for archivo in archivos_subidos:
+            try:
+                # Procesamiento del XML
+                tree = ET.parse(archivo)
+                root = tree.getroot()
+                
+                # Buscamos atributos directamente en la raíz (Comprobante)
+                monto = float(root.get('Total', 0.0))
+                serie = root.get('Serie', '')
+                folio = root.get('Folio', '')
+                folio_completo = f"{serie}{folio}".strip()
+                
+                if not folio_completo:
+                    folio_completo = "Sin Folio"
+                    
+                facturas_extraidas.append({
+                    "Folio": folio_completo,
+                    "Monto ($)": monto
+                })
+            except Exception as e:
+                st.error(f"Error al leer el archivo {archivo.name}: {e}")
+                
+        if facturas_extraidas:
+            df_facturas_input = pd.DataFrame(facturas_extraidas)
+            st.success(f"{len(facturas_extraidas)} factura(s) procesada(s) correctamente.")
+            st.dataframe(df_facturas_input, use_container_width=True, hide_index=True)
 
 # ==========================================
 # 5. MOTOR FINANCIERO Y RESULTADOS
 # ==========================================
 # Limpiar datos vacíos
-if not df_facturas_input.empty:
+if not df_facturas_input.empty and "Monto ($)" in df_facturas_input.columns:
     df_facturas_input['Monto ($)'] = pd.to_numeric(df_facturas_input['Monto ($)'], errors='coerce').fillna(0)
-    df_facturas_input['Plazo (Días)'] = pd.to_numeric(df_facturas_input['Plazo (Días)'], errors='coerce').fillna(0)
     df_validas = df_facturas_input[df_facturas_input["Monto ($)"] > 0].copy()
     
     if not df_validas.empty:
@@ -88,7 +109,7 @@ if not df_facturas_input.empty:
         
         df_validas['Monto Aforado'] = df_validas['Monto ($)'] - df_validas['Comisión'] - df_validas['IVA Com'] - df_validas['Aforo']
         
-        df_validas['Intereses'] = df_validas['Monto Aforado'] * tasa_total * (df_validas['Plazo (Días)'] / 360)
+        df_validas['Intereses'] = df_validas['Monto Aforado'] * tasa_total * (plazo_input / 360)
         df_validas['IVA Int'] = df_validas['Intereses'] * 0.16
         
         df_validas['A Depositar'] = df_validas['Monto Aforado'] - df_validas['Intereses'] - df_validas['IVA Int']
@@ -110,7 +131,7 @@ if not df_facturas_input.empty:
         
         # Tabla detallada con formato
         st.markdown("**Detalle por Factura:**")
-        format_dict = {col: "${:,.2f}" for col in df_validas.columns if col not in ["Folio", "Plazo (Días)"]}
+        format_dict = {col: "${:,.2f}" for col in df_validas.columns if col != "Folio"}
         st.dataframe(df_validas.style.format(format_dict), use_container_width=True, hide_index=True)
 
 # ==========================================
@@ -119,8 +140,11 @@ if not df_facturas_input.empty:
 class FactorajePDF(FPDF):
     def header(self):
         if os.path.exists(LOGO_PATH):
-            self.image(LOGO_PATH, x=10, y=10, w=50)
-        self.set_y(38)
+            # Reducido el tamaño del logo (w=35) y colocado en la esquina superior izquierda
+            self.image(LOGO_PATH, x=10, y=10, w=35)
+        
+        # Ajustamos el inicio del texto hacia abajo (y=40) para evitar que se encime con logos verticales
+        self.set_y(40)
         self.set_font('Arial', 'B', 12)
         self.set_text_color(27, 27, 27) 
         self.cell(0, 6, 'Cotización de Factoraje', 0, 1, 'C')
@@ -152,6 +176,7 @@ if not df_facturas_input.empty and 'df_validas' in locals() and not df_validas.e
         pdf.cell(95, 7, f"Cliente: {nombre_empresa}", 0, 0)
         pdf.cell(95, 7, f"RFC: {rfc_cliente}", 0, 1)
         pdf.cell(0, 7, f"Representante Legal: {representante}", 0, 1)
+        pdf.cell(0, 7, f"Plazo de la Operación: {plazo_input} Días", 0, 1)
         pdf.ln(5)
 
         # 2. RESUMEN FINANCIERO
@@ -180,18 +205,16 @@ if not df_facturas_input.empty and 'df_validas' in locals() and not df_validas.e
         
         # Encabezados de tabla
         pdf.set_fill_color(210, 210, 210)
-        pdf.set_font("Arial", 'B', 8)
-        pdf.cell(35, 6, "Folio", 1, 0, 'C', fill=True)
-        pdf.cell(40, 6, f"Valor ({moneda})", 1, 0, 'C', fill=True)
-        pdf.cell(20, 6, "Días", 1, 0, 'C', fill=True)
+        pdf.set_font("Arial", 'B', 9)
+        pdf.cell(50, 6, "Folio", 1, 0, 'C', fill=True)
+        pdf.cell(45, 6, f"Valor ({moneda})", 1, 0, 'C', fill=True)
         pdf.cell(45, 6, f"A Depositar ({moneda})", 1, 1, 'C', fill=True)
         
         # Filas de la tabla
-        pdf.set_font("Arial", '', 8)
+        pdf.set_font("Arial", '', 9)
         for index, row in df_validas.iterrows():
-            pdf.cell(35, 6, str(row['Folio']), 1, 0, 'C')
-            pdf.cell(40, 6, f"${row['Monto ($)']:,.2f}", 1, 0, 'R')
-            pdf.cell(20, 6, str(row['Plazo (Días)']), 1, 0, 'C')
+            pdf.cell(50, 6, str(row['Folio']), 1, 0, 'C')
+            pdf.cell(45, 6, f"${row['Monto ($)']:,.2f}", 1, 0, 'R')
             pdf.cell(45, 6, f"${row['A Depositar']:,.2f}", 1, 1, 'R')
         pdf.ln(10)
 
@@ -209,8 +232,8 @@ if not df_facturas_input.empty and 'df_validas' in locals() and not df_validas.e
         pdf.cell(90, 5, f"Por: {nombre_empresa}", 0, 0, 'C'); pdf.cell(90, 5, "Por: FEX CAPITAL, S.A. DE C.V.", 0, 1, 'C')
         pdf.cell(90, 5, f"{representante}", 0, 0, 'C'); pdf.cell(90, 5, "Representante Legal", 0, 1, 'C')
 
-        # Generar descarga corrigiendo el método para fpdf2
+        # Generar descarga
         pdf_bytes = bytes(pdf.output())
         b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         
-        st.markdown(f'<a href="data:application/pdf;base64,{b64_pdf}" download="Cotizacion_Factoraje_{folio_cotizacion}.pdf" style="padding:12px 20px; background-color:#0163FF; color:white; font-weight:bold; border-radius:4px; text-decoration:none; display:inline-block;">📥 Descargar Cotización PDF</a>', unsafe_allow_html=True)
+        st.markdown(f'<a href="data:application/pdf;base64,{b64_pdf}" download="Cotizacion_Factoraje_{folio_cotizacion}.pdf" style="padding:12px 20px; background-color:#0163FF; color:white; font-weight:bold; border-radius:4px; text-decoration:none; display:inline-block;">Descargar Cotización PDF</a>', unsafe_allow_html=True)
