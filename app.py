@@ -209,8 +209,8 @@ if not df_facturas_input.empty and 'df_validas' in locals() and not df_validas.e
         pdf.cell(90, 5, f"Por: {nombre_empresa}", 0, 0, 'C'); pdf.cell(90, 5, "Por: FEX CAPITAL, S.A. DE C.V.", 0, 1, 'C')
         pdf.cell(90, 5, f"{representante}", 0, 0, 'C'); pdf.cell(90, 5, "Representante Legal", 0, 1, 'C')
 
-        # Generar descarga
-        pdf_output = pdf.output(dest='S').encode('latin-1')
-        b64_pdf = base64.b64encode(pdf_output).decode('utf-8')
+        # Generar descarga corrigiendo el método para fpdf2
+        pdf_bytes = bytes(pdf.output())
+        b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         
         st.markdown(f'<a href="data:application/pdf;base64,{b64_pdf}" download="Cotizacion_Factoraje_{folio_cotizacion}.pdf" style="padding:12px 20px; background-color:#0163FF; color:white; font-weight:bold; border-radius:4px; text-decoration:none; display:inline-block;">📥 Descargar Cotización PDF</a>', unsafe_allow_html=True)
