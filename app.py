@@ -1,5 +1,7 @@
 import streamlit as st
 import pandas as pd
+from fpdf import FPDF
+import base64
 import os
 from datetime import datetime
 
@@ -14,7 +16,6 @@ LOGO_PATH = "LOGO_FEX.png"
 # 2. INTERFAZ LATERAL (PARÁMETROS)
 # ==========================================
 if os.path.exists(LOGO_PATH):
-    # Alineamos el logo a la izquierda en la web también
     st.sidebar.image(LOGO_PATH, use_container_width=True)
     st.sidebar.markdown("---")
     
@@ -30,7 +31,7 @@ tasa_total = tiie_input + spread_input
 # ==========================================
 # 3. DATOS GENERALES DEL CLIENTE
 # ==========================================
-st.title("Calculadora de Factoraje Puro")
+st.title("Calculadora de Factoraje")
 st.markdown("---")
 
 with st.expander("Información General del Cliente", expanded=True):
@@ -41,9 +42,9 @@ with st.expander("Información General del Cliente", expanded=True):
     folio_cotizacion = col2.text_input("Folio de Cotización", "FEX-FAC-001")
 
 # ==========================================
-# 4. CAPTURA DE FACTURAS (DUAL)
+# 4. CAPTURA DE FACTURAS
 # ==========================================
-st.markdown("### Carga de Facturas (Borderó)")
+st.markdown("### Carga de Facturas")
 
 metodo_captura = st.radio(
     "Selecciona el método de ingreso:",
@@ -59,55 +60,8 @@ if metodo_captura == "Captura Manual Rápida":
     df_facturas_input = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, hide_index=True)
 else:
     st.info("Sube un archivo con las columnas exactas: Folio, Monto ($), Plazo (Días)")
-    archivo_subido = st.file_uploader("Cargar Borderó", type=["csv", "xlsx"])
+    archivo_subido = st.file_uploader("Cargar Archivo", type=["csv", "xlsx"])
     if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith('.csv'):
-                df_facturas_input = pd.read_csv(archivo_subido)
-            else:
-                df_facturas_input = pd.read_excel(archivo_subido)
-            st.success("Archivo procesado correctamente.")
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-
-# ==========================================
-# 5. MOTOR FINANCIERO Y RESULTADOS
-# ==========================================
-# Limpiar datos vacíos
-if not df_facturas_input.empty:
-    df_facturas_input['Monto ($)'] = pd.to_numeric(df_facturas_input['Monto ($)'], errors='coerce').fillna(0)
-    df_facturas_input['Plazo (Días)'] = pd.to_numeric(df_facturas_input['Plazo (Días)'], errors='coerce').fillna(0)
-    df_validas = df_facturas_input[df_facturas_input["Monto ($)"] > 0].copy()
-    
-    if not df_validas.empty:
-        # Cálculos vectorizados (Matemática aplicada a todas las filas a la vez)
-        df_validas['Comisión'] = df_validas['Monto ($)'] * comision_input
-        df_validas['IVA Com'] = df_validas['Comisión'] * 0.16
-        df_validas['Aforo'] = df_validas['Monto ($)'] * aforo_input
-        
-        df_validas['Monto Aforado'] = df_validas['Monto ($)'] - df_validas['Comisión'] - df_validas['IVA Com'] - df_validas['Aforo']
-        
-        df_validas['Intereses'] = df_validas['Monto Aforado'] * tasa_total * (df_validas['Plazo (Días)'] / 360)
-        df_validas['IVA Int'] = df_validas['Intereses'] * 0.16
-        
-        df_validas['A Depositar'] = df_validas['Monto Aforado'] - df_validas['Intereses'] - df_validas['IVA Int']
-        
-        st.markdown("---")
-        st.markdown("### Resumen de la Operación")
-        
-        # Totales
-        totales = df_validas.sum(numeric_only=True)
-        total_facturas = totales['Monto ($)']
-        total_depositar = totales['A Depositar']
-        total_aforo = totales['Aforo']
-        
-        # Tarjetas de resumen métrico
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Valor Total del Borderó", f"{moneda} ${total_facturas:,.2f}")
-        m2.metric("A Depositar Hoy", f"{moneda} ${total_depositar:,.2f}")
-        m3.metric("Aforo (Devolución al Cobro)", f"{moneda} ${total_aforo:,.2f}")
-        
-        # Tabla detallada con formato
-        st.markdown("**Detalle por Factura:**")
-        format_dict = {col: "${:,.2f}" for col in df_validas.columns if col not in ["Folio", "Plazo (Días)"]}
-        st.dataframe(df_validas.style.format(format_dict), use_container_width=True, hide_index=True)
+                df_facturas_
